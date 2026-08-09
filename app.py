@@ -11,7 +11,7 @@ Docker 部署后浏览器访问，支持：
 
 环境变量：
   TMDB_KEY   TMDB API Key（可选，默认内置）
-  PORT       监听端口（默认 8080）
+  PORT       监听端口（默认 24568）
   BASE_URL   默认 OpenList 地址（可选，如 http://192.168.1.100:5244）
   OL_USER    默认 OpenList 账号（可选）
   OL_PASS    默认 OpenList 密码（可选）
@@ -170,5 +170,5 @@ def api_rename():
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
+    port = int(os.environ.get('PORT', 24568))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

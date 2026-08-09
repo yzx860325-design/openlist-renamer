@@ -6,7 +6,7 @@ services:
     image: openlist-renamer:latest
     container_name: openlist-renamer
     ports:
-      - "8080:8080"
+      - "24568:24568"
     environment:
       # 你的 OpenList 地址/账号（默认值可改）
       - BASE_URL=http://10.10.10.1:5445

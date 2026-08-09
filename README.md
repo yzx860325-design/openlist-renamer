@@ -28,13 +28,13 @@ The.Godfather.1972.mp4   →  教父 (1972)/教父 (1972).mkv
 docker compose up -d
 
 # 方法 B：docker run
-docker run -d --name openlist-renamer -p 8080:8080 \
+docker run -d --name openlist-renamer -p 24568:24568 \
   -e BASE_URL=http://192.168.x.x:5244 \
   -e OL_USER=admin -e OL_PASS=admin \
   ghcr.io/yzx860325-design/openlist-renamer:latest
 ```
 
-打开 `http://NAS地址:8080` 即可使用。
+打开 `http://NAS地址:24568` 即可使用。
 
 ### 环境变量
 
@@ -43,7 +43,7 @@ docker run -d --name openlist-renamer -p 8080:8080 \
 | `BASE_URL` | OpenList 地址 | `http://10.10.10.1:5445` |
 | `OL_USER` / `OL_PASS` | OpenList 账号密码 | `admin` / `admin` |
 | `TMDB_KEY` | TMDB API Key | 内置（建议换自己的） |
-| `PORT` | 监听端口 | `8080` |
+| `PORT` | 监听端口 | `24568` |
 | `SECRET_KEY` | 会话密钥 | 内置 |
 
 ### 使用流程（三端通用）
