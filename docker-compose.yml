@@ -32,8 +32,9 @@ services:
       - OL_USER=admin                     # OpenList 账号
       - OL_PASS=admin                     # OpenList 密码
 
-      # ---- TMDB（建议换成你自己的 API Key）----
-      - TMDB_KEY=fe717bbe0351637ab4a8cd6f7c754686
+      # ---- TMDB（⚠️ 必填！改成你自己的 API Key，不填无法匹配/刮削）----
+      # 获取：https://www.themoviedb.org/settings/api
+      - TMDB_KEY=YOUR_TMDB_API_KEY
 
       # ---- 会话密钥（建议改成一串随机字符）----
       - SECRET_KEY=change-me-to-a-random-string

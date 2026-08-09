@@ -13,7 +13,7 @@ COPY templates ./templates
 
 # 默认配置（可用环境变量覆盖）
 ENV PORT=24568
-ENV TMDB_KEY=fe717bbe0351637ab4a8cd6f7c754686
+# ⚠️ TMDB_KEY 不内置！docker run 时必须通过 -e TMDB_KEY=你的Key 传入
 ENV BASE_URL=http://10.10.10.1:5445
 ENV OL_USER=admin
 ENV OL_PASS=admin

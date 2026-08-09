@@ -1,0 +1,51 @@
+# ============================================================
+# OpenList 影视资源智能重命名 + 刮削 — NAS 部署配置
+# 适用：群晖 Synology / 威联通 QNAP / 其他支持 Docker 的 NAS
+# ============================================================
+# 使用方法：
+#   1. 把这个文件保存为 docker-compose.yml
+#   2. 修改下面的 volumes 挂载路径为你的实际影视目录
+#   3. SSH 到 NAS 执行: docker compose up -d
+#   4. 浏览器打开 http://<NAS的IP>:24568
+# ============================================================
+
+version: '3.8'
+
+services:
+  openlist-renamer:
+    image: nullpointerex/openlist-renamer:latest
+    # 备选镜像源（如果 Docker Hub 拉不动，换这个）：
+    # image: ghcr.io/yzx860325-design/openlist-renamer:latest
+
+    container_name: openlist-renamer
+    ports:
+      - "24568:24568"          # 左边可改成你喜欢的端口，如 34568
+
+    environment:
+      # ---- OpenList 网盘连接 ----
+      - BASE_URL=http://10.10.10.1:5445    # 你的 OpenList 地址
+      - OL_USER=admin                      # OpenList 账号
+      - OL_PASS=admin                      # OpenList 密码
+
+      # ---- TMDB（⚠️ 必填！改成你自己的 API Key）----
+      # 获取：https://www.themoviedb.org/settings/api
+      - TMDB_KEY=YOUR_TMDB_API_KEY
+
+      # ---- 会话密钥（改成任意随机字符串）----
+      - SECRET_KEY=openlist-renamer-2026-0809
+
+      # ---- NAS 影视根目录（容器内固定 /media，配合 volumes 挂载）----
+      - MEDIA_ROOT=/media
+
+    volumes:
+      # ⚠️ 把这里的 /volume1/影视 改成你 NAS 上实际的影视目录
+      # 群晖示例：
+      #   /volume1/影视:/media
+      #   /volume2/电影:/media
+      # 威联通示例：
+      #   /share/CACHEDEV1_DATA/影视:/media
+      # 普通 Linux 服务器示例：
+      #   /home/xxx/media:/media
+      - /volume1/影视:/media
+
+    restart: unless-stopped

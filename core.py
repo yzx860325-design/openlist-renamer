@@ -11,6 +11,7 @@ OpenList 影视资源智能重命名 — 核心逻辑模块
 """
 
 import json
+import os
 import re
 import urllib.request
 import urllib.parse
@@ -19,7 +20,8 @@ import urllib.error
 # ============ 配置 ============
 VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov', '.wmv', '.rmvb', '.flv', '.webm', '.m4v'}
 TMDB_BASE = 'https://api.themoviedb.org/3'
-TMDB_KEY = 'fe717bbe0351637ab4a8cd6f7c754686'  # 默认 Key，可用环境变量 TMDB_KEY 覆盖
+# ⚠️ TMDB API Key 不内置在代码里，必须通过环境变量 TMDB_KEY 提供（保护你的 Key）
+TMDB_KEY = os.environ.get('TMDB_KEY', '')
 
 IMPURITY_PATTERNS = [
     r'\[[^\]]*字幕[^\]]*\]',

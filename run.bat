@@ -7,7 +7,17 @@ echo ============================================
 echo.
 
 :: 配置区（改这里）
-set TMDB_KEY=fe717bbe0351637ab4a8cd6f7c754686
+:: ⚠️ TMDB Key 请用 setx 永久设置（避免写入 bat 泄露）：
+::     setx TMDB_KEY 你的APIKey
+:: 或在运行前临时设置：
+::     set TMDB_KEY=你的APIKey
+if "%TMDB_KEY%"=="" (
+    echo [错误] 未设置 TMDB_KEY 环境变量！
+    echo 请先运行: setx TMDB_KEY 你的APIKey
+    echo 然后重新打开本窗口
+    pause
+    exit /b 1
+)
 set SCAN_DIR=PASTE_YOUR_DIR_HERE
 set APPLY=N
 

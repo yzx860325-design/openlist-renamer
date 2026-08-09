@@ -16,6 +16,7 @@ OpenList 影视资源智能重命名工具（GUI 版 v2）
 """
 
 import json
+import os
 import re
 import sys
 import difflib
@@ -29,7 +30,8 @@ from tkinter import ttk, messagebox
 # ============ 配置 ============
 VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov', '.wmv', '.rmvb', '.flv', '.webm', '.m4v'}
 TMDB_BASE = 'https://api.themoviedb.org/3'
-TMDB_KEY = 'fe717bbe0351637ab4a8cd6f7c754686'  # 用户 Key（可改）
+# ⚠️ TMDB API Key 不内置，从环境变量读取（保护 Key 不泄露）
+TMDB_KEY = os.environ.get('TMDB_KEY', '')
 
 IMPURITY_PATTERNS = [
     r'\[[^\]]*字幕[^\]]*\]',
