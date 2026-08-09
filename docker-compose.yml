@@ -1,18 +1,45 @@
-version: '3'
+# OpenList 影视资源智能重命名 — Docker Compose 部署
+# =================================================
+# 用法：
+#   1. 按需修改下面的环境变量（OpenList 地址/账号/TMDB Key）
+#   2. docker compose up -d
+#   3. 浏览器打开 http://<NAS的IP>:24568
+#
+# 推荐用已构建的镜像（Docker Hub 或 GHCR），也可以本地 build：
+#   方法 A（拉取镜像，推荐）：
+#     docker compose pull && docker compose up -d
+#   方法 B（本地构建）：
+#     docker compose up -d --build
+
+version: '3.8'
 
 services:
   openlist-renamer:
-    build: .
-    image: openlist-renamer:latest
+    # 二选一：镜像地址（推荐用 Docker Hub，国内拉取快）
+    image: nullpointerex/openlist-renamer:latest
+    # 或 GHCR 镜像：
+    # image: ghcr.io/yzx860325-design/openlist-renamer:latest
+    # 或本地构建（去掉上面 image 行，取消注释 build）：
+    # build: .
+
     container_name: openlist-renamer
     ports:
-      - "24568:24568"
+      - "24568:24568"          # 宿主端口:容器端口（想换访问端口改左边）
     environment:
-      # 你的 OpenList 地址/账号（默认值可改）
-      - BASE_URL=http://10.10.10.1:5445
-      - OL_USER=admin
-      - OL_PASS=admin
-      # TMDB API Key（默认内置，建议改成你自己的）
+      # ---- OpenList 连接（改成你的）----
+      - BASE_URL=http://10.10.10.1:5445   # OpenList 地址
+      - OL_USER=admin                     # OpenList 账号
+      - OL_PASS=admin                     # OpenList 密码
+
+      # ---- TMDB（建议换成你自己的 API Key，避免公共 Key 被限流）----
       - TMDB_KEY=fe717bbe0351637ab4a8cd6f7c754686
+
+      # ---- 会话密钥（建议改成一串随机字符）----
       - SECRET_KEY=change-me-to-a-random-string
+
+      # ---- 端口（一般不用改，容器内固定 24568）----
+      # - PORT=24568
+
     restart: unless-stopped
+    # 可选：限制内存
+    # mem_limit: 256m
