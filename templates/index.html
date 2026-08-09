@@ -98,9 +98,28 @@
     <button onclick="listDir($('#pathBar').value)">进入</button>
     <button onclick="goUp()">上一级</button>
     <button onclick="listDir('/')">根目录</button>
+    <button class="primary" style="background:#059669" onclick="batchAnalyze()">🔍 批量智能识别</button>
+    <span id="batchStatus" class="count"></span>
   </div>
   <table id="dirTable">
     <thead><tr><th style="width:55%">名称</th><th style="width:10%">类型</th><th style="width:10%">大小</th><th>操作</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<!-- 批量识别结果 -->
+<div class="panel" id="batchPanel" style="display:none">
+  <div class="row">
+    <strong>📋 批量识别结果</strong>
+    <button class="primary" onclick="batchConfirm()">✅ 确认并生成方案</button>
+    <button onclick="hideBatch()">关闭</button>
+    <span class="hint">绿色=高置信 · 黄色=需确认 · 红色=未匹配（点行选择正确条目）</span>
+  </div>
+  <table id="batchTable">
+    <thead><tr>
+      <th style="width:28%">影视文件夹</th><th style="width:12%">置信度</th>
+      <th style="width:35%">匹配结果</th><th style="width:25%">结构</th>
+    </tr></thead>
     <tbody></tbody>
   </table>
 </div>
@@ -324,6 +343,138 @@ async function doRename() {
     }
     if (d.success) await listDir(currentPath);
   } catch(e) { log('❌ ' + e.message, 'err'); }
+}
+
+// ---------- 批量智能识别（自动扫描+匹配+确认）----------
+let batchResults = [];
+
+async function batchAnalyze() {
+  if (!connOK()) { log('请先连接', 'err'); return; }
+  $('#batchStatus').textContent = '识别中...';
+  try {
+    const d = await api('/api/batch-analyze', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({src: currentSrc, path: currentPath, include_year: $('#includeYear').checked})
+    });
+    batchResults = d.results;
+    renderBatch();
+    $('#batchPanel').style.display = 'block';
+    $('#batchStatus').textContent = `共 ${d.total} 部影视`;
+    const hi = d.results.filter(r => r.confidence === 'hi').length;
+    const mid = d.results.filter(r => r.confidence === 'mid').length;
+    const low = d.results.filter(r => r.confidence === 'low' || !r.matched).length;
+    log(`🔍 批量识别完成：${d.total} 部（高置信 ${hi} / 需确认 ${mid} / 未匹配 ${low}）`, 'ok');
+  } catch(e) {
+    $('#batchStatus').textContent = '';
+    log('❌ ' + e.message, 'err');
+  }
+}
+
+function renderBatch() {
+  const tbody = $('#batchTable tbody');
+  tbody.innerHTML = '';
+  for (let i = 0; i < batchResults.length; i++) {
+    const r = batchResults[i];
+    const confTxt = {'hi': '✅ 高', 'mid': '🟡 中', 'low': '❌ 低'}[r.confidence] || '❌';
+    const confCls = {'hi': 'ok', 'mid': 'warn', 'low': 'err'}[r.confidence] || 'err';
+    const matchTxt = r.matched
+      ? `${r.media.name} (${r.media.year}) [${r.media.media_type === 'tv' ? '剧集' : '电影'}]`
+      : `未匹配（自动提取: ${r.query || '-'}）`;
+    const struct = r.structure.season_dirs.length
+      ? `${r.structure.season_dirs.length} 季 + ${r.structure.top_video_count} 集`
+      : `${r.structure.top_video_count} 个视频`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(r.name)}</td>
+      <td class="${confCls}">${confTxt}</td>
+      <td>${esc(matchTxt)}</td>
+      <td class="count">${struct}</td>`;
+    tr.style.cursor = 'pointer';
+    tr.title = '点击展开/选择正确匹配';
+    tr.onclick = () => batchPick(i);
+    tbody.appendChild(tr);
+  }
+}
+
+async function batchPick(idx) {
+  const r = batchResults[idx];
+  if (!r.matched) {
+    // 未匹配：让用户手动输入搜索
+    const q = prompt('未自动匹配。输入正确影视名搜索：', r.query || '');
+    if (!q) return;
+    try {
+      const d = await api('/api/search?q=' + encodeURIComponent(q));
+      if (!d.results.length) { alert('无结果'); return; }
+      const labels = d.results.map((x, i) => `${i+1}. ${x.label}`);
+      const pick = prompt('选择正确条目（输入编号）：\n' + labels.join('\n'));
+      const idx2 = parseInt(pick) - 1;
+      if (isNaN(idx2) || idx2 < 0 || idx2 >= d.results.length) { alert('无效选择'); return; }
+      const m = d.results[idx2];
+      batchResults[idx].media = m;
+      batchResults[idx].matched = true;
+      batchResults[idx].confidence = 'mid';
+      renderBatch();
+    } catch(e) { alert('搜索失败: ' + e.message); }
+  } else {
+    // 已匹配：可选更换
+    const q = prompt(`当前: ${r.media.name} (${r.media.year})\n如匹配正确直接回车跳过，否则输入新搜索词：`, r.media.name);
+    if (!q || q === r.media.name) return;
+    try {
+      const d = await api('/api/search?q=' + encodeURIComponent(q));
+      if (!d.results.length) { alert('无结果'); return; }
+      const labels = d.results.map((x, i) => `${i+1}. ${x.label}`);
+      const pick = prompt('选择正确条目（输入编号）：\n' + labels.join('\n'));
+      const idx2 = parseInt(pick) - 1;
+      if (isNaN(idx2) || idx2 < 0 || idx2 >= d.results.length) { alert('无效选择'); return; }
+      batchResults[idx].media = d.results[idx2];
+      batchResults[idx].confidence = 'mid';
+      renderBatch();
+    } catch(e) { alert('搜索失败: ' + e.message); }
+  }
+}
+
+async function batchConfirm() {
+  // 收集已匹配的条目 → 生成方案
+  const matched = batchResults.filter(r => r.matched);
+  if (!matched.length) { alert('没有已匹配的影视，请先修正'); return; }
+  // 对每个匹配条目生成方案（复用 api/plan 逻辑：传入当前分类路径）
+  let allPlans = [];
+  for (const r of matched) {
+    try {
+      const d = await api('/api/plan', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({src: currentSrc, path: r.src_path, media: r.media, include_year: $('#includeYear').checked})
+      });
+      for (const p of d.plans) {
+        allPlans.push({...p, batchSrc: r.name});
+      }
+    } catch(e) { log(`⚠ ${r.name}: ${e.message}`, 'warn'); }
+  }
+  plans = allPlans;
+  // 渲染到方案表
+  const tbody = $('#planTable tbody');
+  tbody.innerHTML = '';
+  if (!plans.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted)">没有可重命名的项</td></tr>';
+  }
+  for (const p of plans) {
+    const tr = document.createElement('tr');
+    const tag = p.batchSrc ? `<span class="badge dir">${esc(p.batchSrc)}</span> ` : '';
+    tr.innerHTML = `<td><input type="checkbox" class="planChk" checked></td>
+      <td class="old">${tag}${esc(p.src_name)}</td><td class="arrow">→</td>
+      <td class="new">${esc(p.new_name)}</td><td><span class="badge note">${esc(p.note)}</span></td>`;
+    tbody.appendChild(tr);
+  }
+  $('#planCount').textContent = `批量共 ${plans.length} 项可重命名`;
+  log(`📋 批量生成方案：${plans.length} 项（来自 ${matched.length} 部影视）`, 'ok');
+  $('#batchPanel').style.display = 'none';
+  $('#batchStatus').textContent = '';
+  // 滚动到方案表
+  document.querySelector('#planTable').scrollIntoView({behavior: 'smooth'});
+}
+
+function hideBatch() {
+  $('#batchPanel').style.display = 'none';
+  $('#batchStatus').textContent = '';
 }
 
 // ---------- 独立刮削（不改文件名，只生成 NFO/海报）----------

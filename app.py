@@ -25,7 +25,7 @@ import threading
 
 from flask import Flask, render_template, request, jsonify, session
 
-from core import TMDB, OpenList, LocalFS, scrape_folder
+from core import TMDB, OpenList, LocalFS, scrape_folder, extract_movie_query, extract_episode, is_video
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'openlist-renamer-secret')
@@ -216,6 +216,102 @@ def api_plan():
                     'src_path': src_path,
                 })
         return jsonify({'ok': True, 'plans': plans, 'total': len(items)})
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': str(e)})
+
+
+@app.route('/api/batch-analyze', methods=['POST'])
+def api_batch_analyze():
+    """
+    批量智能识别：扫描分类目录（如 /动画剧集）下所有影视文件夹，
+    自动提取片名 → TMDB 匹配 → 识别结构 → 生成改名方案。
+    返回带置信度的结果，供用户确认。
+    """
+    data = request.get_json(silent=True) or {}
+    src = data.get('src', 'fs')
+    path = data.get('path', '/')
+    include_year = data.get('include_year', True)
+
+    try:
+        driver = _source_driver(src)
+        tmdb = TMDB()
+        items = driver.list_dir(path)
+        results = []
+        SEASON_RE = re.compile(r'^(?:Season\s*|第\s*)(\d+)(?:\s*季|\s*Season)?$|^S0*(\d+)$', re.I)
+
+        for it in items:
+            name = it.get('name', '')
+            is_dir = it.get('is_dir', False)
+            if not is_dir:
+                continue  # 只处理文件夹（影视条目）
+            src_path = path.rstrip('/') + '/' + name
+
+            # 1. 自动提取查询词
+            query, hint = extract_movie_query(name)
+
+            # 2. TMDB 匹配
+            match = None
+            media_type = None
+            if query:
+                try:
+                    all_results = tmdb.search_all(query)
+                    if all_results:
+                        # 优先 hint 类型
+                        if hint in ('tv', 'movie'):
+                            match = next((r for r in all_results if r.get('_media_type') == hint), None)
+                        if not match:
+                            match = all_results[0]
+                        media_type = match.get('_media_type')
+                except Exception:
+                    pass
+
+            # 3. 识别结构：子目录（季）+ 散视频
+            inner_items = driver.list_dir(src_path)
+            season_dirs = []
+            top_videos = []
+            for inner in inner_items:
+                if inner.get('is_dir'):
+                    season_dirs.append(inner['name'])
+                elif is_video(inner.get('name', '')):
+                    top_videos.append(inner['name'])
+
+            # 4. 生成该条目的改名方案
+            media = None
+            if match:
+                m_year = (match.get('first_air_date') or match.get('release_date') or '')[:4]
+                media = {
+                    'id': match['id'],
+                    'name': match.get('name') or match.get('title'),
+                    'original_name': match.get('original_name') or match.get('original_title'),
+                    'year': m_year,
+                    'media_type': media_type,
+                }
+
+            # 置信度
+            year_in_name = re.search(r'(19|20)\d{2}', name)
+            conf = 'low'
+            if match:
+                conf = 'mid'
+                if media_type == hint:
+                    conf = 'hi'
+                if year_in_name and media and media.get('year') == year_in_name.group(0):
+                    conf = 'hi'
+
+            results.append({
+                'name': name,
+                'src_path': src_path,
+                'query': query,
+                'matched': bool(match),
+                'confidence': conf,
+                'media': media,
+                'structure': {
+                    'season_dirs': season_dirs,
+                    'top_videos': top_videos[:20],
+                    'top_video_count': len(top_videos),
+                },
+            })
+
+        return jsonify({'ok': True, 'results': results, 'total': len(results)})
     except Exception as e:
         return jsonify({'ok': False, 'msg': str(e)})
 

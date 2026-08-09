@@ -78,6 +78,78 @@ def is_video(name):
     return name.rsplit('.', 1)[-1].lower() in {e.lstrip('.') for e in VIDEO_EXTS}
 
 
+# ============ 自动影视名提取（批量识别用）============
+_CN_SEG = re.compile(r'(?=[\u4e00-\u9fff])[\u4e00-\u9fff0-9]{2,}')
+_YEAR_RE2 = re.compile(r'(19|20)\d{2}')
+_STOP = {'the', 'and', 'of', 'a', 'an', 'in', 'on', 'for', 'hd', 'hq', 'web', 'dl',
+         'bluray', 'remux', 'dv', 'hdr', 'sdr', 'uhd', 'atmos', 'dts', 'ac3', 'aac',
+         'flac', 'truehd', 'ddp', 'dolby', 'vision', 'h265', 'h264', 'x264', 'x265',
+         'hevc', 'avc', 'av1', '10bit', '8bit', 's01', 's02', 's03', 'season', 'ep'}
+_IMPURITY = re.compile(
+    r'(?i)(2160p|1080p|720p|480p|\d{2,5}p|4k|8k|uhd|hdr10?|sdr|dovi|dolby.?vision|'
+    r'x264|x265|h\.?264|h\.?265|hevc|avc|av1|mpeg4|divx|vp9|bluray|remux|web-?dl|web-?rip|'
+    r'hdrip|bdrip|dvdrip|dts\d?\.?\d?|ac3|aac|flac|truehd|ddp\d?\.?\d?|dd\d\.\d|'
+    r'\d\.\d|atmos|2audio|dual|60fps|50fps|24fps|120fps|\d+fps|10bit|8bit|'
+    r'60帧|臻彩|杜比视界|高码率|内封|国粤|国英|台粤|特效字幕|简繁|双语|超分|原盘|'
+    r'web|hq|hd|dl|hiveweb|dreamhd|wuke|pandaqt|maxplus|hive|4k原盘|max\b|edr|sdr|'
+    r'S\d{1,2}E\d{1,3}|第\d+[集話话]|[Ee][Pp]\d)')
+_CN_IMP = re.compile(
+    r'(?i)(蓝光原盘|REMUX|DV&HDR|国台粤英|内封简繁|特效字幕|国粤|国英|台粤|双语|高码率|'
+    r'杜比视界|60帧|臻彩|4K|2160p|1080p|HDR|DV|DDP|DTS|FLAC|AC3|Atmos|H265|HEVC|'
+    r'HiveWeb|DreamHD|PandaQT|WuKe|MAXPLUS|超分|内嵌|简中|字幕|豆瓣)')
+
+
+def extract_movie_query(name):
+    """
+    从文件夹名/文件名自动提取影视名查询词（批量识别用）。
+    返回 (query, media_type_hint)
+    media_type_hint: 'tv' / 'movie' / None
+    """
+    name = name.strip()
+    # 判断是否剧集（含 SxxExx / 第X集 / EP）
+    is_tv = bool(re.search(r'S\d{1,2}E\d{1,3}|第\d+[集話话]|[Ee][Pp]\d', name, re.I))
+
+    # 去掉季目录信息（Season 1 等）——只删 "Season N" / "第 N 季" 这类完整季标记
+    s = re.sub(r'(?i)(Season\s*\d+|第\s*\d+\s*季)', ' ', name)
+    s = re.sub(r'\{[^}]*\}', ' ', s)  # 去 {tmdbid-xxx} 标签
+    s = re.sub(r'[\._\-]', ' ', s)
+
+    # 中文候选：连续中文段
+    cn_segs = _CN_SEG.findall(s)
+    cn = ''
+    for seg in cn_segs:
+        seg = _CN_IMP.sub('', seg).strip()
+        if len(seg) >= 2:
+            cn = seg
+            break
+
+    # 英文候选：去杂质 + 去 SxxEyy，保留有意义词（含年份过滤后的主体词）
+    s2 = _IMPURITY.sub(' ', s)
+    words = []
+    for w in s2.split():
+        w = w.strip('()[]{}（）【】:：\'"·')
+        if not w or len(w) == 1:
+            continue
+        if w.lower() in _STOP:
+            continue
+        if re.fullmatch(r'[\d\.]+[a-z]*', w, re.I):
+            continue
+        if re.fullmatch(r'(19|20)\d{2}', w):  # 纯年份跳过（不参与查询）
+            continue
+        words.append(w)
+    en = ' '.join(words[:4]).strip()
+
+    # 有中文优先中文（单独），否则英文
+    if cn:
+        query = cn
+    elif en:
+        query = en
+    else:
+        # 纯数字名（如 731 (2025)）：保留数字+年份
+        query = re.sub(r'[\[\]\(\)（）【】]', ' ', name).strip() or name
+    return query, ('tv' if is_tv else 'movie')
+
+
 # ============ TMDB ============
 class TMDB:
     def __init__(self, api_key=None):
