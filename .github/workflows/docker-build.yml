@@ -10,8 +10,8 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  DH_USER: ${{ vars.DOCKERHUB_USERNAME }}
-  DH_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/openlist-renamer
+  DH_USER: nullpointerx
+  DH_IMAGE: nullpointerx/openlist-renamer
 
 jobs:
   build:
