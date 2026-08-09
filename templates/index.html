@@ -131,6 +131,7 @@
   </table>
   <div class="row mt">
     <label><input type="checkbox" id="scrapeChk" checked> 重命名后自动刮削（生成 NFO + 海报）</label>
+    <span id="scrapeHint" class="hint"></span>
     <button class="danger" onclick="doRename()">执行重命名</button>
     <span class="count">⚠ 直接修改文件名，不可撤销</span>
   </div>
@@ -167,6 +168,14 @@ function switchSrc(src) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.src === src));
   document.querySelectorAll('.src-body').forEach(b => b.classList.toggle('active', b.id === 'body-' + src));
   if (src === 'fs') checkFsRoot();
+  // 刮削只对 fs 来源有效（OpenList v3 上传 API 兼容性问题）
+  $('#scrapeChk').disabled = (src !== 'fs');
+  if (src !== 'fs') {
+    $('#scrapeChk').checked = false;
+    $('#scrapeHint').textContent = '（OpenList 来源不支持写入文件 → 刮削已禁用）';
+  } else {
+    $('#scrapeHint').textContent = '（重命名后自动生成 NFO + 海报）';
+  }
   listDir('/');
 }
 

@@ -199,9 +199,11 @@ def api_rename():
         # 刮削：对重命名成功的【文件夹】执行（剧集/电影整库文件夹）
         scrape_results = []
         tmdb = TMDB()
-        if scrape:
+        # ⚠️ OpenList v3 上传 API 有兼容性问题（夸克/阿里等网盘不支持直接 API 上传文件）
+        # 所以 OpenList 来源默认不执行刮削（重命名后下载到本地再刮削）
+        scrape_enabled = scrape and src == 'fs'
+        if scrape_enabled:
             for t in targets:
-                # 判断：如果改的是文件夹且原路径是目录 → 刮削该文件夹
                 parent_path = t['src_path'].rsplit('/', 1)[0]
                 new_full = parent_path + '/' + t['new_name']
                 if not t.get('is_dir'):

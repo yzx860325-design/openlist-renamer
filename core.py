@@ -192,6 +192,58 @@ class OpenList:
                 results.append((path, new_name, False, str(e)))
         return ok, results
 
+    def write_file(self, path, data, binary=False):
+        """通过 Alist 兼容 API 上传文件到网盘（支持文本和二进制）
+        路径如 /夸克网盘/狂飙/tvshow.nfo"""
+        import urllib.parse, urllib.request as _ur
+        parent = '/'.join(path.rstrip('/').split('/')[:-1]) or '/'
+        filename = path.rstrip('/').split('/')[-1]
+
+        if binary:
+            # 二进制（如海报/背景图）：用 /api/fs/form 上传
+            # 注：Alist/Alist 兼容服务的 form upload 端点
+            from io import BytesIO
+            boundary = '----WebKitFormBoundary' + _os.urandom(8).hex()
+            body = (
+                ('--' + boundary + '\r\n').encode()
+                + ('Content-Disposition: form-data; name="path"\r\n\r\n').encode()
+                + parent.encode('utf-8') + b'\r\n'
+                + ('--' + boundary + '\r\n').encode()
+                + ('Content-Disposition: form-data; name="file"; filename="%s"\r\n' % filename).encode()
+                + b'Content-Type: application/octet-stream\r\n\r\n'
+                + data + b'\r\n'
+                + ('--' + boundary + '--\r\n').encode()
+            )
+            req = _ur.Request(self.base + '/api/fs/form',
+                              data=body, method='POST',
+                              headers={'Authorization': self.token,
+                                       'User-Agent': 'OpenListRenamer/3.0',
+                                       'Content-Type': 'multipart/form-data; boundary=' + boundary})
+            with _ur.urlopen(req, timeout=30) as r:
+                d = json.loads(r.read().decode('utf-8', errors='replace'))
+                return d.get('code') == 200
+        else:
+            # 文本（如 NFO XML）：用 /api/fs/put 直接传文本
+            req = urllib.request.Request(self.base + '/api/fs/put',
+                                         data=data.encode('utf-8'),
+                                         method='PUT',
+                                         headers={'Authorization': self.token,
+                                                  'Content-Type': 'application/json',
+                                                  'User-Agent': 'OpenListRenamer/3.0'})
+            body = json.dumps({'path': parent, 'file_name': filename, 'file': data}).encode('utf-8')
+            req = urllib.request.Request(self.base + '/api/fs/put',
+                                         data=body, method='PUT',
+                                         headers={'Authorization': self.token,
+                                                  'Content-Type': 'application/json',
+                                                  'User-Agent': 'OpenListRenamer/3.0'})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    d = json.loads(r.read().decode('utf-8', errors='replace'))
+                    return d.get('code') == 200
+            except Exception:
+                # 兜底：put 不支持时改用 /api/fs/form
+                return self.write_file(path, data, binary=True)
+
 
 # ============ 本地文件系统（NAS 挂载卷 / 电脑本地）============
 import os as _os

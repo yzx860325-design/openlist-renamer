@@ -4,7 +4,7 @@
 # ============================================================
 # 使用方法：
 #   1. 把这个文件保存为 docker-compose.yml
-#   2. 修改下面的 volumes 挂载路径为你的实际影视目录
+#   2. 修改 volumes 挂载路径为你的实际影视目录
 #   3. SSH 到 NAS 执行: docker compose up -d
 #   4. 浏览器打开 http://<NAS的IP>:24568
 # ============================================================
@@ -29,13 +29,19 @@ services:
 
       # ---- TMDB（⚠️ 必填！改成你自己的 API Key）----
       # 获取：https://www.themoviedb.org/settings/api
-      - TMDB_KEY=YOUR_TMDB_API_KEY
+      - TMDB_KEY=fe717bbe0351637ab4a8cd6f7c754686
 
       # ---- 会话密钥（改成任意随机字符串）----
       - SECRET_KEY=openlist-renamer-2026-0809
 
       # ---- NAS 影视根目录（容器内固定 /media，配合 volumes 挂载）----
       - MEDIA_ROOT=/media
+
+      # ---- 代理（passwall 旁路由，TMDB 被墙必需）----
+      - HTTP_PROXY=http://10.10.10.252:1079
+      - HTTPS_PROXY=http://10.10.10.252:1079
+      # 内网地址不走代理（OpenList/NAS 直连）
+      - NO_PROXY=10.10.10.1,localhost,127.0.0.1,10.10.10.252
 
     volumes:
       # ⚠️ 把这里的 /volume1/影视 改成你 NAS 上实际的影视目录
@@ -46,6 +52,6 @@ services:
       #   /share/CACHEDEV1_DATA/影视:/media
       # 普通 Linux 服务器示例：
       #   /home/xxx/media:/media
-      - /volume1/影视:/media
+      - /volume3/media/media:/media
 
     restart: unless-stopped
