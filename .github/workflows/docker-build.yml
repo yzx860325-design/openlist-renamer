@@ -10,8 +10,8 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  DH_USER: nullpointerx
-  DH_IMAGE: nullpointerx/openlist-renamer
+  DH_USER: nullpointerex
+  DH_IMAGE: nullpointerex/openlist-renamer
 
 jobs:
   build:
@@ -41,7 +41,7 @@ jobs:
         if: env.DH_USER != ''
         uses: docker/login-action@v3
         with:
-          username: nullpointerx
+          username: nullpointerex
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract metadata (GHCR)
