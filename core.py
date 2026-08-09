@@ -115,10 +115,13 @@ class TMDB:
         item: {name, is_dir}
         media: {name, original_name, year, media_type}
         返回 (new_name, note)；无法处理返回 (None, note)
+
+        Season 子目录（Season 1 / 第 1 季 / S01）→ 内部文件统一按 剧名 (年份) SxxExx.ext 改名
         """
         name = item.get('name', '')
         is_dir = item.get('is_dir', False)
 
+        # 顶层非视频文件过滤
         if not is_dir and not is_video(name):
             return None, '非视频文件'
 
@@ -128,18 +131,41 @@ class TMDB:
         ytxt = ' (%s)' % year if (include_year and year) else ''
 
         season, episode = extract_episode(name)
-        ext = name.rsplit('.', 1)[-1] if '.' in name else ''
 
         if is_tv:
+            # 季文件夹：保留原名（Season N / 第 1 季），不强制改名
+            if is_dir and (re.match(r'^[Ss]eason\s*\d+$', name) or re.match(r'^第\s*\d+\s*季', name)):
+                # 从季号提取
+                m = re.search(r'\d+', name)
+                if m:
+                    return name, f'季文件夹(季{m.group(0)})'
             if season is None or episode is None:
                 return None, '剧集但无法解析集数'
             if is_dir:
                 return '%s%s' % (title, ytxt), '剧集文件夹'
+            ext = name.rsplit('.', 1)[-1] if '.' in name else ''
             return '%s%s S%02dE%02d.%s' % (title, ytxt, season, episode, ext), '剧集 %d-%d' % (season, episode)
         else:
             if is_dir:
                 return '%s%s' % (title, ytxt), '电影文件夹'
+            ext = name.rsplit('.', 1)[-1] if '.' in name else ''
             return '%s%s.%s' % (title, ytxt, ext), '电影'
+
+    def build_season_plans(self, season_dir_items, media, include_year=True):
+        """
+        对一个 Season 子目录内的所有视频生成改名方案。
+        season_dir_items: [{name, is_dir}] （Season 子目录内部的文件列表）
+        media: {name, original_name, year, media_type}
+        返回 [(old_name, new_name, note), ...]  仅返回成功项
+        """
+        results = []
+        for item in season_dir_items:
+            if item.get('is_dir'):
+                continue
+            new_name, note = self.build_plan(item, media, include_year)
+            if new_name:
+                results.append((item['name'], new_name, note))
+        return results
 
 
 # ============ OpenList（Alist 兼容 API）============

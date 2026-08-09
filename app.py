@@ -20,6 +20,7 @@ Docker 部署后浏览器访问，支持：
 """
 
 import os
+import re
 import threading
 
 from flask import Flask, render_template, request, jsonify, session
@@ -170,14 +171,49 @@ def api_plan():
         driver = _source_driver(src)
         items = driver.list_dir(path)
         plans = []
+        is_tv = media.get('media_type') == 'tv'
+        # 季子目录名正则
+        SEASON_RE = re.compile(r'^(?:Season\s*|第\s*)(\d+)(?:\s*季|\s*Season)?$|^S0*(\d+)$', re.I)
+
         for it in items:
+            name = it.get('name', '')
+            is_dir = it.get('is_dir', False)
+            src_path = path.rstrip('/') + '/' + name
+
+            # 剧集场景：检测到 Season 子目录 → 递归处理内部视频
+            if is_tv and is_dir and SEASON_RE.match(name):
+                # 进入 Season 子目录，列出内部视频
+                try:
+                    inner_items = driver.list_dir(src_path)
+                    season_plans = tmdb.build_season_plans(inner_items, media, include_year)
+                    for old_name, new_name, note in season_plans:
+                        if new_name.lower() != old_name.lower():
+                            plans.append({
+                                'src_name': old_name,
+                                'new_name': new_name,
+                                'note': note + f'（在{name}/）',
+                                'src_path': src_path + '/' + old_name,
+                                'is_season_inner': True,
+                            })
+                except Exception as e:
+                    pass
+                # 季文件夹本身也列出（标记可跳过或保留）
+                plans.append({
+                    'src_name': name,
+                    'new_name': name,
+                    'note': '季文件夹（保留）',
+                    'src_path': src_path,
+                    'is_season_dir': True,
+                })
+                continue
+
             new_name, note = tmdb.build_plan(it, media, include_year)
             if new_name is not None and new_name.lower() != it.get('name', '').lower():
                 plans.append({
                     'src_name': it.get('name', ''),
                     'new_name': new_name,
                     'note': note,
-                    'src_path': path.rstrip('/') + '/' + it.get('name', ''),
+                    'src_path': src_path,
                 })
         return jsonify({'ok': True, 'plans': plans, 'total': len(items)})
     except Exception as e:
