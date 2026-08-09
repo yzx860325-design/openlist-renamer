@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  openlist-renamer:
+    build: .
+    image: openlist-renamer:latest
+    container_name: openlist-renamer
+    ports:
+      - "8080:8080"
+    environment:
+      # 你的 OpenList 地址/账号（默认值可改）
+      - BASE_URL=http://10.10.10.1:5445
+      - OL_USER=admin
+      - OL_PASS=admin
+      # TMDB API Key（默认内置，建议改成你自己的）
+      - TMDB_KEY=fe717bbe0351637ab4a8cd6f7c754686
+      - SECRET_KEY=change-me-to-a-random-string
+    restart: unless-stopped
