@@ -194,6 +194,7 @@ def api_plan():
                                 'note': note + f'（在{name}/）',
                                 'src_path': src_path + '/' + old_name,
                                 'is_season_inner': True,
+                                'media': media,
                             })
                 except Exception as e:
                     pass
@@ -204,6 +205,7 @@ def api_plan():
                     'note': '季文件夹（保留）',
                     'src_path': src_path,
                     'is_season_dir': True,
+                    'media': media,
                 })
                 continue
 
@@ -214,6 +216,7 @@ def api_plan():
                     'new_name': new_name,
                     'note': note,
                     'src_path': src_path,
+                    'media': media,
                 })
         return jsonify({'ok': True, 'plans': plans, 'total': len(items)})
     except Exception as e:
@@ -338,9 +341,13 @@ def api_rename():
             for t in targets:
                 parent_path = t['src_path'].rsplit('/', 1)[0]
                 new_full = parent_path + '/' + t['new_name']
-                if not t.get('is_dir'):
+                # 只刮削"顶层影视文件夹"：非季内文件、非季文件夹、且带 media 的目录项
+                if t.get('is_season_inner') or t.get('is_season_dir'):
+                    continue
+                if not t.get('media') or not t['media'].get('id'):
                     continue
                 try:
+                    # 顶层目录方案（重命名目标即文件夹）→ 刮削
                     r = scrape_folder(driver, new_full, t.get('media') or {}, tmdb)
                     if r.get('ok'):
                         scrape_results.append({'path': new_full, 'files': r.get('files', []), 'ok': True})

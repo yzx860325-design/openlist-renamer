@@ -324,7 +324,9 @@ function toggleAll(cb) {
 // ---------- 执行 ----------
 async function doRename() {
   if (!plans.length) { log('没有方案', 'err'); return; }
-  if (!selectedMedia) { log('请先选择影视', 'err'); return; }
+  // 批量方案（每项带自己的 media）或单影视方案（用 selectedMedia）
+  const hasBatchMedia = plans.some(p => p.media && p.media.id);
+  if (!hasBatchMedia && !selectedMedia) { log('请先选择影视', 'err'); return; }
   const checked = [...document.querySelectorAll('.planChk')].map(c => c.checked);
   const targets = plans.filter((_, i) => checked[i]);
   if (!targets.length) { log('没有勾选任何项', 'err'); return; }
@@ -445,7 +447,8 @@ async function batchConfirm() {
         body: JSON.stringify({src: currentSrc, path: r.src_path, media: r.media, include_year: $('#includeYear').checked})
       });
       for (const p of d.plans) {
-        allPlans.push({...p, batchSrc: r.name});
+        // 每项附带自己的 media（供刮削用正确影视信息）
+        allPlans.push({...p, batchSrc: r.name, media: r.media});
       }
     } catch(e) { log(`⚠ ${r.name}: ${e.message}`, 'warn'); }
   }
