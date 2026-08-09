@@ -41,7 +41,7 @@ jobs:
         if: env.DH_USER != ''
         uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: nullpointerx
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract metadata (GHCR)
