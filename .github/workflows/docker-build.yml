@@ -10,6 +10,8 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  DH_USER: ${{ vars.DOCKERHUB_USERNAME }}
+  DH_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/openlist-renamer
 
 jobs:
   build:
@@ -35,7 +37,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Login to Docker Hub
+        if: env.DH_USER != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata (GHCR)
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -44,7 +53,7 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=
 
-      - name: Build & Push
+      - name: Build & Push to GHCR
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -52,3 +61,14 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Build & Push to Docker Hub
+        if: env.DH_USER != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.DH_IMAGE }}:latest
+            ${{ env.DH_IMAGE }}:${{ github.sha }}
