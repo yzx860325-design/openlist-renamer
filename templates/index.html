@@ -560,6 +560,40 @@ function hideBatch() {
 async function doScrape() {
   if (!connOK()) { log('请先连接', 'err'); return; }
   if (currentSrc !== 'fs') { log('刮削仅支持 NAS/本地来源（OpenList 不支持写文件）', 'err'); return; }
+
+  // 批量场景：方案里的顶层影视文件夹项（带 media、非季内/季文件夹）逐个刮削
+  const batchTargets = plans.filter(p =>
+    p.media && p.media.id && !p.is_season_inner && !p.is_season_dir
+    && !p.src_name.includes('.')  // 顶层文件夹（无扩展名）
+  );
+  const hasBatch = batchTargets.length > 0;
+
+  if (hasBatch) {
+    if (!confirm(`批量刮削 ${batchTargets.length} 个影视文件夹吗？\n每项生成 tvshow.nfo/movie.nfo + poster.jpg + fanart.jpg（不改文件名）`)) return;
+    $('#btnScrape').disabled = true;
+    let okCount = 0;
+    for (const t of batchTargets) {
+      try {
+        // 重命名前的父路径 + 新文件夹名 = 刮削目标
+        const parent = t.src_path.substring(0, t.src_path.lastIndexOf('/'));
+        const target = parent + '/' + t.new_name;
+        const d = await api('/api/scrape', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({src: currentSrc, path: target, media: t.media})
+        });
+        if (d.ok) { okCount++; log(`🖼 ${t.new_name} → ${d.files.join(', ')}`, 'ok'); }
+        else log(`⚠ ${t.new_name}: ${d.msg || '失败'}`, 'warn');
+      } catch(e) {
+        log(`⚠ ${t.new_name}: ${e.message}`, 'warn');
+      }
+    }
+    log(`✅ 批量刮削完成：${okCount}/${batchTargets.length}`, 'ok');
+    await listDir(currentPath);
+    $('#btnScrape').disabled = false;
+    return;
+  }
+
+  // 单影视场景：刮削当前目录
   if (!selectedMedia) { log('请先匹配 TMDB 选择影视', 'err'); return; }
   if (!confirm(`对当前目录「${currentPath}」执行刮削吗？\n将生成：tvshow.nfo / movie.nfo + poster.jpg + fanart.jpg（不改文件名）`)) return;
   $('#btnScrape').disabled = true;
