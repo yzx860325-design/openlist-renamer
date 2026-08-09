@@ -331,8 +331,7 @@ async function doRename() {
   const targets = plans.filter((_, i) => checked[i]);
   if (!targets.length) { log('没有勾选任何项', 'err'); return; }
   if (!confirm(`确定重命名 ${targets.length} 个资源吗？\n该操作会直接修改${currentSrc === 'fs' ? '本地/NAS 文件' : '网盘资源'}名！`)) return;
-  try {
-    const d = await api('/api/rename', {
+  try {    const d = await api('/api/rename', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({src: currentSrc, items: targets, scrape: $('#scrapeChk').checked})
     });
@@ -395,6 +394,83 @@ function renderBatch() {
     tr.onclick = () => batchPick(i);
     tbody.appendChild(tr);
   }
+  // 检测同剧多季分组（合并建议）
+  detectMergeGroups();
+}
+
+// ---------- 同剧多季合并检测 ----------
+function normName(s) {
+  if (!s) return '';
+  // 去掉 Ⅱ/II/2季/第二季 等季标识，归一化
+  return s.replace(/[ⅡIⅠ2２]/g, '')
+          .replace(/[·・]?第\s*[一二三四五六七八九十\d]+\s*季/g, '')
+          .replace(/\s+/g, '').toLowerCase();
+}
+
+function detectMergeGroups() {
+  const groups = [];
+  const seen = {};
+  for (const r of batchResults) {
+    if (!r.matched || r.media.media_type !== 'tv') continue;
+    const key = normName(r.media.name);
+    if (!key || key.length < 2) continue;
+    if (!seen[key]) { seen[key] = []; groups.push(seen[key]); }
+    seen[key].push(r);
+  }
+  // 找同剧 ≥2 个文件夹的组
+  const mergeable = groups.filter(g => g.length >= 2);
+  const old = document.getElementById('mergeBar');
+  if (old) old.remove();
+  if (!mergeable.length) return;
+
+  const bar = document.createElement('div');
+  bar.id = 'mergeBar';
+  bar.style.cssText = 'margin-top:10px;padding:10px;background:#064e3b;border:1px solid #059669;border-radius:6px;';
+  let html = '<strong style="color:#34d399">🔀 检测到同剧多季（可合并为一个文件夹）</strong><br>';
+  for (const g of mergeable) {
+    const mainName = g[0].media.name + ' (' + g[0].media.year + ')';
+    const parts = g.map((r, idx) => {
+      const seasonHint = guessSeasonFromName(r.name, idx);
+      return `"${esc(r.name)}"→季${seasonHint}`;
+    }).join('，');
+    html += `<div style="margin-top:6px">
+      <span style="color:#a7f3d0">${esc(mainName)}</span>
+      <span class="count">：${parts}</span>
+      <button style="margin-left:8px;background:#059669;color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer"
+        onclick="doMerge([${g.map(r => `'${r.src_path.replace(/'/g, "\\'")}'`).join(',')}], '${escAttr(mainName)}', [${g.map((r, idx) => guessSeasonFromName(r.name, idx)).join(',')}])">合并</button>
+    </div>`;
+  }
+  bar.innerHTML = html;
+  document.getElementById('batchPanel').insertBefore(bar, $('#batchTable').nextSibling);
+}
+
+function guessSeasonFromName(name, fallbackIdx) {
+  // 从文件夹名提取季号：含 Ⅱ/II/2/第二季 → 2
+  const n = name || '';
+  if (/[ⅡIⅠ2２]/.test(n) || /第\s*[二2]\s*季/.test(n)) return 2;
+  if (/[Ⅲ3３]/.test(n) || /第\s*[三3]\s*季/.test(n)) return 3;
+  if (/[Ⅳ4４]/.test(n) || /第\s*[四4]\s*季/.test(n)) return 4;
+  if (/Season\s*(\d+)/i.test(n)) return parseInt(n.match(/Season\s*(\d+)/i)[1]);
+  return fallbackIdx + 1; // 默认按顺序
+}
+
+async function doMerge(srcPaths, totalName, seasonHints) {
+  const items = srcPaths.map((p, i) => ({src_path: p, season_hint: seasonHints[i], display_name: totalName}));
+  if (!confirm(`确认合并为「${totalName}」？\n${items.map((it, i) => `${i+1}. ${it.src_path.split('/').pop()} → Season ${it.season_hint}`).join('\n')}\n\n⚠ 会移动文件！`)) return;
+  try {
+    const d = await api('/api/tv-merge', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({src: currentSrc, items, total_name: totalName})
+    });
+    if (d.ok) {
+      log(`✅ 合并完成：${d.total_path}`, 'ok');
+      if (d.ops) for (const o of d.ops.slice(0, 10)) log(`  ↳ ${o}`, 'ok');
+      await listDir(currentPath);
+      hideBatch();
+    } else {
+      log('❌ ' + d.msg, 'err');
+    }
+  } catch(e) { log('❌ ' + e.message, 'err'); }
 }
 
 async function batchPick(idx) {

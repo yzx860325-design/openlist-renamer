@@ -363,6 +363,101 @@ def api_rename():
         return jsonify({'ok': False, 'msg': str(e)})
 
 
+@app.route('/api/tv-merge', methods=['POST'])
+def api_tv_merge():
+    """
+    同剧多季合并：把同一部剧的多个文件夹合并为一个总文件夹，
+    内部按 Season 1 / Season 2 ... 组织。
+    items: [{src_path, season_hint(1/2/..), display_name}]
+    返回操作结果。
+    """
+    data = request.get_json(silent=True) or {}
+    src = data.get('src', 'fs')
+    items = data.get('items', [])
+    total_name = data.get('total_name', '')  # 总文件夹名（如 斩神之凡尘神域 (2024)）
+    if not items:
+        return jsonify({'ok': False, 'msg': '缺少待合并项'})
+    if not total_name:
+        return jsonify({'ok': False, 'msg': '缺少总文件夹名'})
+
+    try:
+        driver = _source_driver(src)
+        if not hasattr(driver, 'mkdir') or not hasattr(driver, 'move'):
+            return jsonify({'ok': False, 'msg': '当前来源不支持目录合并（仅 NAS/本地）'})
+
+        # 排序：按季号
+        items_sorted = sorted(items, key=lambda x: x.get('season_hint', 1))
+        parent = items_sorted[0]['src_path'].rsplit('/', 1)[0]
+        total_path = parent + '/' + total_name
+
+        # 1. 第一个作为主目录 → 重命名为总文件夹名
+        first = items_sorted[0]
+        first_path = first['src_path']
+        if first_path != total_path:
+            if driver.exists(total_path):
+                return jsonify({'ok': False, 'msg': '总文件夹已存在: ' + total_name})
+            # 重命名第一个目录为总文件夹
+            driver.rename(first_path, total_name)
+            first_path = total_path
+
+        ops = []
+        # 2. 对每个季：整理成 Season N 子目录
+        for it in items_sorted:
+            season_no = it.get('season_hint', 1)
+            src_dir = it['src_path']
+            if it == first:
+                src_dir = total_path
+            season_dir = total_path + f'/Season {season_no}'
+
+            # 判断当前目录内部是否已是 Season N 结构
+            entries = driver.list_dir(src_dir)
+            has_season_sub = any(
+                e.get('is_dir') and re.match(r'^(Season\s*\d+|第\s*\d+\s*季|S0*\d+)$', e.get('name', ''), re.I)
+                for e in entries
+            )
+
+            if src_dir == total_path:
+                # 主目录：如果内部没有 Season 子目录 → 整个内容移入 Season 1
+                if not has_season_sub:
+                    driver.mkdir(season_dir)
+                    for e in entries:
+                        if e.get('name') in ('tvshow.nfo', 'poster.jpg', 'fanart.jpg', 'season01-poster.jpg'):
+                            continue  # 顶层元数据保留
+                        # 视频/字幕移入 Season 1
+                        driver.move(src_dir + '/' + e['name'], season_dir + '/' + e['name'])
+                        ops.append(f'{e["name"][:40]} → Season {season_no}/')
+                # 已有 Season 子目录则不动
+            else:
+                # 非主目录：整个目录内容移入 Season N（若内部已是 Season 结构则直接把 Season 子目录移入）
+                if has_season_sub:
+                    for e in entries:
+                        if e.get('is_dir'):
+                            driver.move(src_dir + '/' + e['name'], total_path + '/' + e['name'])
+                            ops.append(f'{e["name"][:40]} → 并入')
+                    # 删除空目录
+                    try:
+                        driver.rename(src_dir, src_dir + '_merged_tmp')  # 先重命名避免占位
+                    except Exception:
+                        pass
+                else:
+                    driver.mkdir(season_dir)
+                    for e in entries:
+                        if e.get('is_dir'):
+                            continue
+                        driver.move(src_dir + '/' + e['name'], season_dir + '/' + e['name'])
+                        ops.append(f'{e["name"][:40]} → Season {season_no}/')
+                    # 删除空目录（改名为占位再删）
+                    try:
+                        driver.rename(src_dir, src_dir + '_empty')
+                    except Exception:
+                        pass
+
+        return jsonify({'ok': True, 'total_path': total_path, 'ops_count': len(ops),
+                        'ops': ops[:50]})
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': str(e)})
+
+
 @app.route('/api/scrape', methods=['POST'])
 def api_scrape():
     """对指定文件夹执行刮削（已重命名的文件夹）"""

@@ -425,6 +425,34 @@ class LocalFS:
                 results.append((path, new_name, False, str(e)))
         return ok, results
 
+    def mkdir(self, path):
+        """创建目录"""
+        full = self._resolve(path)
+        _os.makedirs(full, exist_ok=True)
+        return True
+
+    def move(self, src_path, dst_path):
+        """移动文件/目录（跨目录）"""
+        src = self._resolve(src_path)
+        dst = self._resolve(dst_path)
+        dst_parent = _os.path.dirname(dst)
+        _os.makedirs(dst_parent, exist_ok=True)
+        if not _os.path.exists(src):
+            raise Exception('源不存在: %s' % src_path)
+        if _os.path.exists(dst) and _os.path.abspath(src) != _os.path.abspath(dst):
+            raise Exception('目标已存在: %s' % dst_path)
+        _os.rename(src, dst)
+        return True
+
+    def exists(self, path):
+        full = self._resolve(path)
+        return _os.path.exists(full)
+
+    def list_dir_paths(self, path):
+        """列出目录下所有项（含子目录），返回 [(name, is_dir)]"""
+        items = self.list_dir(path)
+        return [(it['name'], it['is_dir']) for it in items]
+
     def write_file(self, path, data, binary=False):
         """在挂载卷内写文件（如 NFO / 海报）"""
         full = self._resolve(path)
