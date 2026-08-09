@@ -1,12 +1,29 @@
-# OpenList 影视资源智能重命名
+# OpenList 影视资源智能重命名 + 刮削
 
 把**混乱命名的电影/剧集**整理成**芝杜播放器能识别**的标准结构，一次搞定，不再手动改文件名。
 
 ```
-狂飙.第12集.mp4           →  狂飙 (2023)/Season 01/狂飙 S01E12.mp4
-漫长的季节.03.mkv         →  漫长的季节 (2023)/Season 01/漫长的季节 S01E03.mkv
+狂飙.第12集.mp4           →  狂飙 (2023)/狂飙 (2023) S01E12.mp4
+漫长的季节.03.mkv         →  漫长的季节 (2023)/漫长的季节 (2023) S01E03.mkv
 The.Godfather.1972.mp4   →  教父 (1972)/教父 (1972).mkv
 [电影天堂]沙丘2.mkv      →  沙丘2 (2024)/沙丘2 (2024).mkv
+```
+
+## 🚀 v3 新特性（多来源 + 自动刮削）
+
+| 能力 | 说明 |
+|---|---|
+| **三端来源切换** | OpenList 网盘 / NAS 挂载卷 / 电脑本地，任意地方都能改 |
+| **自动刮削** | 重命名后自动生成 `tvshow.nfo`/`movie.nfo` + `poster.jpg` + `fanart.jpg`（Jellyfin/Kodi/芝杜通用标准） |
+| **完整影视库整理** | 改名 → 建文件夹 → 拉 TMDB 简介/海报/背景图，一步到位 |
+
+刮削产物示例（重命名一个文件夹后自动生成）：
+```
+狂飙 (2023)/
+├── tvshow.nfo        ← 剧集元数据（标题/年份/简介/类型）
+├── poster.jpg        ← 海报
+├── fanart.jpg        ← 背景图
+└── 狂飙 (2023) S01E01.mp4
 ```
 
 ## ✨ 三种使用方式
@@ -45,14 +62,25 @@ docker run -d --name openlist-renamer -p 24568:24568 \
 | `TMDB_KEY` | TMDB API Key | 内置（建议换自己的） |
 | `PORT` | 监听端口 | `24568` |
 | `SECRET_KEY` | 会话密钥 | 内置 |
+| `MEDIA_ROOT` | NAS/本地影视根目录 | `/media` |
 
-### 使用流程（三端通用）
+### NAS 挂载（整理本地/NAS 文件时必配）
 
-1. **连接**：填 OpenList 地址 + 账号密码
+`docker-compose.yml` 的 volumes 段，把影视目录挂到 `/media`：
+```yaml
+volumes:
+  - /volume1/影视:/media   # 群晖示例
+  # - /share/CACHEDEV1_DATA/影视:/media   # 威联通示例
+```
+
+### 使用流程
+
+1. **选择来源**：OpenList 网盘 / NAS 本地（Tab 切换）
 2. **进入**某部影视所在的文件夹
 3. **输入真实影视名**（你记录的名字，如"狂飙"）→ **匹配 TMDB**
 4. **选择**正确结果（同名影视用年份区分）
 5. **生成改名方案** → 勾选 → **执行重命名**
+6. **自动刮削**：勾选"重命名后自动刮削"→ 自动生成 NFO + 海报/背景图
 
 ---
 
@@ -107,12 +135,12 @@ python media_renamer.py --key YOUR_KEY --scan "D:\电影" --year 2024
 
 ```
 ├── app.py                    # Web 版（Flask，Docker 入口）
-├── core.py                   # 核心逻辑（三端共用）
-├── templates/index.html      # Web 前端
+├── core.py                   # 核心逻辑：集数解析/TMDB/OpenList/本地FS/刮削引擎
+├── templates/index.html      # Web 前端（来源切换 + 刮削）
 ├── openlist_renamer_gui.py   # GUI 版（tkinter）
 ├── media_renamer.py          # 命令行版
 ├── Dockerfile                # Docker 镜像
-├── docker-compose.yml        # 一键部署
+├── docker-compose.yml        # 一键部署（含 NAS 挂载示例）
 └── requirements.txt          # Python 依赖（仅 flask）
 ```
 

@@ -8,6 +8,7 @@
   :root {
     --bg: #0f172a; --panel: #1e293b; --panel2: #334155; --border: #475569;
     --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --ok: #4ade80; --err: #f87171;
+    --warn: #fbbf24;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: "Segoe UI", "Microsoft YaHei", sans-serif; padding: 16px; }
@@ -36,30 +37,56 @@
   .badge.dir { background: #0c4a6e; color: #7dd3fc; }
   .badge.file { background: #374151; color: #9ca3af; }
   .badge.note { background: #451a03; color: #fdba74; }
-  #log { background: #0b1120; border: 1px solid var(--border); border-radius: 6px; padding: 8px; height: 130px; overflow-y: auto; font-family: Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
-  #log .err { color: var(--err); } #log .ok { color: var(--ok); }
+  .badge.ok { background: #14532d; color: #86efac; }
+  #log { background: #0b1120; border: 1px solid var(--border); border-radius: 6px; padding: 8px; height: 150px; overflow-y: auto; font-family: Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
+  #log .err { color: var(--err); } #log .ok { color: var(--ok); } #log .warn { color: var(--warn); }
   .count { color: var(--muted); font-size: 12px; }
   #pathBar { flex: 1; min-width: 200px; }
   #mediaSelect { width: 100%; max-width: 480px; }
   .inline { display: flex; gap: 8px; align-items: center; }
   .mt { margin-top: 8px; }
+  /* 来源 Tab */
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tab { padding: 6px 16px; border-radius: 6px 6px 0 0; border: 1px solid var(--border); border-bottom: none; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 13px; }
+  .tab.active { background: var(--accent); color: #0f172a; font-weight: bold; }
+  .src-body { display: none; }
+  .src-body.active { display: block; }
+  .hint { color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .scrape-tag { color: var(--ok); font-size: 12px; }
 </style>
 </head>
 <body>
 
-<h1>🎬 OpenList 影视资源智能重命名 <span>输入真实影视名 → TMDB 匹配 → 批量改名</span></h1>
+<h1>🎬 影视资源智能重命名 + 刮削 <span>多来源管理 · TMDB 匹配 · NFO/海报自动生成</span></h1>
 
-<!-- 连接区 -->
-<div class="panel">
-  <div class="row">
-    <label>OpenList 地址</label>
-    <input id="base" style="width:220px" placeholder="http://192.168.x.x:5244">
-    <label>账号</label>
-    <input id="username" style="width:100px" value="admin">
-    <label>密码</label>
-    <input id="password" type="password" style="width:100px" value="admin">
-    <button id="btnLogin" class="primary" onclick="login()">连接</button>
-    <span id="connStatus" class="count">未连接</span>
+<!-- 来源切换 -->
+<div class="panel" style="padding-bottom:0">
+  <div class="tabs">
+    <div class="tab active" data-src="openlist" onclick="switchSrc('openlist')">🌐 OpenList 网盘</div>
+    <div class="tab" data-src="fs" onclick="switchSrc('fs')">💾 NAS / 本地文件</div>
+  </div>
+
+  <!-- OpenList 连接 -->
+  <div class="src-body active" id="body-openlist">
+    <div class="row">
+      <label>地址</label>
+      <input id="base" style="width:220px" placeholder="http://192.168.x.x:5244">
+      <label>账号</label>
+      <input id="username" style="width:100px" value="admin">
+      <label>密码</label>
+      <input id="password" type="password" style="width:100px" value="admin">
+      <button id="btnLogin" class="primary" onclick="login()">连接</button>
+      <span id="connStatus" class="count">未连接</span>
+    </div>
+  </div>
+
+  <!-- 本地文件 -->
+  <div class="src-body" id="body-fs">
+    <div class="row">
+      <label>影视根目录</label>
+      <span id="fsRoot" class="count">加载中...</span>
+      <span class="hint">（Docker 挂载的 /media 目录，用 MEDIA_ROOT 环境变量可改）</span>
+    </div>
   </div>
 </div>
 
@@ -73,7 +100,7 @@
     <button onclick="listDir('/')">根目录</button>
   </div>
   <table id="dirTable">
-    <thead><tr><th style="width:60%">名称</th><th style="width:12%">类型</th><th>操作</th></tr></thead>
+    <thead><tr><th style="width:55%">名称</th><th style="width:10%">类型</th><th style="width:10%">大小</th><th>操作</th></tr></thead>
     <tbody></tbody>
   </table>
 </div>
@@ -98,38 +125,63 @@
   <table id="planTable">
     <thead><tr>
       <th style="width:30px"><input type="checkbox" id="checkAll" checked onclick="toggleAll(this)"></th>
-      <th style="width:32%">原名</th><th style="width:4%"></th><th style="width:32%">新名</th><th>说明</th>
+      <th style="width:30%">原名</th><th style="width:4%"></th><th style="width:30%">新名</th><th>说明</th>
     </tr></thead>
     <tbody></tbody>
   </table>
   <div class="row mt">
-    <button class="danger" onclick="doRename()">执行重命名（勾选项）</button>
-    <span class="count">⚠ 直接修改网盘内文件名，操作不可撤销</span>
+    <label><input type="checkbox" id="scrapeChk" checked> 重命名后自动刮削（生成 NFO + 海报）</label>
+    <button class="danger" onclick="doRename()">执行重命名</button>
+    <span class="count">⚠ 直接修改文件名，不可撤销</span>
   </div>
 </div>
 
 <!-- 日志 -->
 <div class="panel">
-  <div id="log">欢迎使用。先连接 OpenList，再进入影视目录。<br></div>
+  <div id="log">欢迎使用。选择来源 → 进入影视目录 → 输入真实影视名匹配 → 生成方案 → 执行。<br></div>
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
+let currentSrc = 'openlist';
 let currentPath = '/';
 let plans = [];
+let selectedMedia = null;
 
 function log(msg, cls='') {
   const div = $('#log');
   div.innerHTML += `<span class="${cls}">${msg}</span>\n`;
   div.scrollTop = div.scrollHeight;
 }
-function connOK() { return $('#connStatus').textContent !== '未连接'; }
 
 async function api(url, opts={}) {
   const r = await fetch(url, opts);
   const d = await r.json();
   if (!d.ok) throw new Error(d.msg || '请求失败');
   return d;
+}
+
+// ---------- 来源切换 ----------
+function switchSrc(src) {
+  currentSrc = src;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.src === src));
+  document.querySelectorAll('.src-body').forEach(b => b.classList.toggle('active', b.id === 'body-' + src));
+  if (src === 'fs') checkFsRoot();
+  listDir('/');
+}
+
+async function checkFsRoot() {
+  try {
+    const d = await api('/api/fs/roots');
+    $('#fsRoot').textContent = d.exists ? `✅ ${d.root}（已挂载）` : `❌ ${d.root}（未挂载）`;
+  } catch(e) {
+    $('#fsRoot').textContent = '查询失败';
+  }
+}
+
+function connOK() {
+  if (currentSrc === 'fs') return true;
+  return $('#connStatus').textContent !== '未连接';
 }
 
 // ---------- 连接 ----------
@@ -153,9 +205,9 @@ async function login() {
 
 // ---------- 目录 ----------
 async function listDir(path) {
-  if (!connOK()) { log('请先连接', 'err'); return; }
+  if (!connOK()) { log('请先连接 OpenList', 'err'); return; }
   try {
-    const d = await api('/api/list?path=' + encodeURIComponent(path));
+    const d = await api('/api/list?src=' + currentSrc + '&path=' + encodeURIComponent(path));
     currentPath = d.path;
     $('#pathBar').value = d.path;
     const tbody = $('#dirTable tbody');
@@ -163,19 +215,26 @@ async function listDir(path) {
     for (const it of d.items) {
       const tr = document.createElement('tr');
       const badge = it.is_dir ? '<span class="badge dir">目录</span>' : '<span class="badge file">文件</span>';
+      const size = it.is_dir ? '' : fmtSize(it.size);
       const act = it.is_dir
-        ? `<button onclick="listDir('${(d.path==='/'?'':d.path)+'/'+esc(it.name)}')">打开</button>`
+        ? `<button onclick="listDir('${(d.path==='/'?'':d.path)+'/'+escAttr(it.name)}')">打开</button>`
         : '';
-      tr.innerHTML = `<td>${esc(it.name)}</td><td>${badge}</td><td>${act}</td>`;
+      tr.innerHTML = `<td>${esc(it.name)}</td><td>${badge}</td><td class="count">${size}</td><td>${act}</td>`;
       tbody.appendChild(tr);
     }
-    log(`📂 ${d.path}（${d.items.length} 项）`);
+    log(`📂 [${currentSrc}] ${d.path}（${d.items.length} 项）`);
   } catch(e) { log('❌ ' + e.message, 'err'); }
 }
 function goUp() {
   const p = currentPath;
   if (p === '/') return;
   listDir(p.substring(0, p.lastIndexOf('/')) || '/');
+}
+function fmtSize(n) {
+  if (!n) return '';
+  if (n > 1073741824) return (n/1073741824).toFixed(1) + ' GB';
+  if (n > 1048576) return (n/1048576).toFixed(1) + ' MB';
+  return Math.round(n/1024) + ' KB';
 }
 
 // ---------- TMDB ----------
@@ -192,6 +251,7 @@ async function searchTMDB() {
       o.textContent = r.label;
       sel.appendChild(o);
     }
+    selectedMedia = d.results[0] || null;
     log(`🔍 找到 ${d.results.length} 个结果，请选择正确的`);
   } catch(e) { log('❌ ' + e.message, 'err'); }
 }
@@ -203,16 +263,17 @@ async function makePlan() {
   if (!sel.value) { log('请先匹配并选择影视', 'err'); return; }
   let media;
   try { media = JSON.parse(sel.value); } catch(e) { log('选择无效', 'err'); return; }
+  selectedMedia = media;
   try {
     const d = await api('/api/plan', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({path: currentPath, media, include_year: $('#includeYear').checked})
+      body: JSON.stringify({src: currentSrc, path: currentPath, media, include_year: $('#includeYear').checked})
     });
     plans = d.plans;
     const tbody = $('#planTable tbody');
     tbody.innerHTML = '';
     if (!plans.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted)">没有可重命名的项（可能是空目录/已规范/无法解析集数）</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted)">没有可重命名的项</td></tr>';
     }
     for (const p of plans) {
       const tr = document.createElement('tr');
@@ -222,7 +283,7 @@ async function makePlan() {
       tbody.appendChild(tr);
     }
     $('#planCount').textContent = `共 ${plans.length} 项可重命名（共 ${d.total} 项）`;
-    log(`📋 生成方案：${plans.length} 项可重命名`);
+    log(`📋 生成方案：${plans.length} 项`);
   } catch(e) { log('❌ ' + e.message, 'err'); }
 }
 
@@ -233,16 +294,23 @@ function toggleAll(cb) {
 // ---------- 执行 ----------
 async function doRename() {
   if (!plans.length) { log('没有方案', 'err'); return; }
+  if (!selectedMedia) { log('请先选择影视', 'err'); return; }
   const checked = [...document.querySelectorAll('.planChk')].map(c => c.checked);
   const targets = plans.filter((_, i) => checked[i]);
   if (!targets.length) { log('没有勾选任何项', 'err'); return; }
-  if (!confirm(`确定重命名 ${targets.length} 个资源吗？\n该操作会直接修改网盘内的文件名！`)) return;
+  if (!confirm(`确定重命名 ${targets.length} 个资源吗？\n该操作会直接修改${currentSrc === 'fs' ? '本地/NAS 文件' : '网盘资源'}名！`)) return;
   try {
     const d = await api('/api/rename', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({items: targets})
+      body: JSON.stringify({src: currentSrc, items: targets, scrape: $('#scrapeChk').checked})
     });
-    log(`✅ 完成：成功 ${d.success}/${d.total}`, 'ok');
+    log(`✅ 重命名完成：成功 ${d.success}/${d.total}`, 'ok');
+    if (d.scrape && d.scrape.length) {
+      for (const s of d.scrape) {
+        if (s.ok) log(`  🖼 刮削 ${s.path} → ${s.files.join(', ')}`, 'ok');
+        else log(`  ⚠ 刮削 ${s.path}: ${s.msg}`, 'warn');
+      }
+    }
     if (d.success) await listDir(currentPath);
   } catch(e) { log('❌ ' + e.message, 'err'); }
 }
@@ -251,6 +319,9 @@ function esc(s) {
   const div = document.createElement('div');
   div.textContent = s || '';
   return div.innerHTML;
+}
+function escAttr(s) {
+  return esc(s).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
 }
 
 // 默认值

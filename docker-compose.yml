@@ -1,11 +1,12 @@
 # OpenList 影视资源智能重命名 — Docker Compose 部署
 # =================================================
 # 用法：
-#   1. 按需修改下面的环境变量（OpenList 地址/账号/TMDB Key）
-#   2. docker compose up -d
-#   3. 浏览器打开 http://<NAS的IP>:24568
+#   1. 按需修改环境变量（OpenList 地址/账号/TMDB Key）
+#   2. 修改 volumes 挂载你的 NAS/本地影视目录
+#   3. docker compose up -d
+#   4. 浏览器打开 http://<NAS的IP>:24568
 #
-# 推荐用已构建的镜像（Docker Hub 或 GHCR），也可以本地 build：
+# 两种镜像源：
 #   方法 A（拉取镜像，推荐）：
 #     docker compose pull && docker compose up -d
 #   方法 B（本地构建）：
@@ -15,7 +16,7 @@ version: '3.8'
 
 services:
   openlist-renamer:
-    # 二选一：镜像地址（推荐用 Docker Hub，国内拉取快）
+    # 二选一：镜像地址（推荐 Docker Hub，国内拉取快）
     image: nullpointerex/openlist-renamer:latest
     # 或 GHCR 镜像：
     # image: ghcr.io/yzx860325-design/openlist-renamer:latest
@@ -31,14 +32,22 @@ services:
       - OL_USER=admin                     # OpenList 账号
       - OL_PASS=admin                     # OpenList 密码
 
-      # ---- TMDB（建议换成你自己的 API Key，避免公共 Key 被限流）----
+      # ---- TMDB（建议换成你自己的 API Key）----
       - TMDB_KEY=fe717bbe0351637ab4a8cd6f7c754686
 
       # ---- 会话密钥（建议改成一串随机字符）----
       - SECRET_KEY=change-me-to-a-random-string
 
-      # ---- 端口（一般不用改，容器内固定 24568）----
-      # - PORT=24568
+      # ---- 本地/NAS 影视根目录（容器内路径，配合 volumes 挂载）----
+      - MEDIA_ROOT=/media
+
+    volumes:
+      # 把 NAS 影视目录挂载到 /media：
+      #   NAS路径:容器路径
+      # 示例（群晖）：/volume1/影视:/media
+      # 示例（威联通）：/share/CACHEDEV1_DATA/影视:/media
+      # 示例（本地路径）：/path/to/你的影视:/media
+      - /volume1/影视:/media
 
     restart: unless-stopped
     # 可选：限制内存

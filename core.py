@@ -191,6 +191,213 @@ class OpenList:
         return ok, results
 
 
+# ============ 本地文件系统（NAS 挂载卷 / 电脑本地）============
+import os as _os
+import shutil as _shutil
+
+IMG_BASE = 'https://image.tmdb.org/t/p/'
+
+
+class LocalFS:
+    """
+    本地/挂载卷文件系统适配器。
+    安全设计：所有路径必须位于 root 下（防目录穿越）。
+    """
+
+    def __init__(self, root='/media'):
+        self.root = _os.path.abspath(root)
+
+    def _resolve(self, path):
+        """把逻辑路径（/xxx）解析为物理路径，校验在 root 内"""
+        if not path:
+            path = '/'
+        # 去掉前导斜杠
+        rel = path.lstrip('/')
+        full = _os.path.join(self.root, rel)
+        full = _os.path.abspath(full)
+        if not (full == self.root or full.startswith(self.root + _os.sep)):
+            raise Exception('路径越界: %s' % path)
+        return full
+
+    def _to_logic(self, full):
+        """物理路径转逻辑路径"""
+        full = _os.path.abspath(full)
+        rel = full[len(self.root):].lstrip(_os.sep).replace(_os.sep, '/')
+        return '/' + rel if rel else '/'
+
+    def list_dir(self, path):
+        full = self._resolve(path)
+        if not _os.path.isdir(full):
+            raise Exception('不是目录: %s' % path)
+        items = []
+        try:
+            entries = sorted(_os.listdir(full), key=str.lower)
+        except PermissionError:
+            raise Exception('无权限读取: %s' % path)
+        for name in entries:
+            p = _os.path.join(full, name)
+            try:
+                st = _os.stat(p)
+                items.append({'name': name,
+                              'is_dir': _os.path.isdir(p),
+                              'size': st.st_size if not _os.path.isdir(p) else 0})
+            except Exception:
+                continue
+        return items
+
+    def rename(self, path, name):
+        """重命名文件/目录；name 不含路径分隔符"""
+        if '/' in name or '\\' in name:
+            raise Exception('新名称不能包含路径分隔符')
+        full = self._resolve(path)
+        parent = _os.path.dirname(full)
+        new_full = _os.path.join(parent, name)
+        if not _os.path.exists(full):
+            raise Exception('源不存在: %s' % path)
+        if _os.path.exists(new_full) and _os.path.abspath(new_full) != full:
+            raise Exception('目标已存在: %s' % name)
+        _os.rename(full, new_full)
+        return True
+
+    def batch_rename(self, items):
+        ok = 0
+        results = []
+        for path, new_name in items:
+            try:
+                if self.rename(path, new_name):
+                    ok += 1
+                    results.append((path, new_name, True, ''))
+                else:
+                    results.append((path, new_name, False, '重命名失败'))
+            except Exception as e:
+                results.append((path, new_name, False, str(e)))
+        return ok, results
+
+    def write_file(self, path, data, binary=False):
+        """在挂载卷内写文件（如 NFO / 海报）"""
+        full = self._resolve(path)
+        parent = _os.path.dirname(full)
+        _os.makedirs(parent, exist_ok=True)
+        mode = 'wb' if binary else 'w'
+        kwargs = {} if binary else {'encoding': 'utf-8'}
+        with open(full, mode, **kwargs) as f:
+            f.write(data)
+        return full
+
+
+# ============ 刮削引擎（NFO + 海报）============
+def _xml_escape(s):
+    if not s:
+        return ''
+    return (str(s).replace('&', '&amp;').replace('<', '&lt;')
+            .replace('>', '&gt;').replace('"', '&quot;').replace("'", '&apos;'))
+
+
+def download_image(tmdb, poster_path, size='w500', timeout=30):
+    """下载 TMDB 图片，返回 bytes"""
+    if not poster_path:
+        return None
+    url = IMG_BASE + size + poster_path
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 OpenListRenamer/2.0'})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except Exception:
+        return None
+
+
+def build_nfo(media, detail):
+    """
+    生成 Jellyfin/Kodi 标准的 NFO 内容。
+    media: {name, original_name, year, media_type, id}
+    detail: TMDB 详情 dict
+    返回 XML 字符串
+    """
+    is_tv = media.get('media_type') == 'tv'
+    title = media.get('name') or media.get('original_name') or ''
+    otitle = media.get('original_name') or title
+    year = media.get('year') or ''
+    plot = detail.get('overview') or ''
+    genres = [g.get('name', '') for g in (detail.get('genres') or [])]
+    genre_str = ''.join('<genre>%s</genre>' % _xml_escape(g) for g in genres if g)
+
+    lines = []
+    lines.append('<?xml version="1.0" encoding="utf-8" standalone="yes"?>')
+    lines.append('<%s>' % ('tvshow' if is_tv else 'movie'))
+    lines.append('  <title>%s</title>' % _xml_escape(title))
+    lines.append('  <originaltitle>%s</originaltitle>' % _xml_escape(otitle))
+    if year:
+        lines.append('  <year>%s</year>' % _xml_escape(year))
+        lines.append('  <premiered>%s-01-01</premiered>' % _xml_escape(year))
+    if plot:
+        lines.append('  <plot>%s</plot>' % _xml_escape(plot))
+        lines.append('  <outline>%s</outline>' % _xml_escape(plot))
+    if genre_str:
+        lines.append(genre_str)
+    lines.append('  <poster>poster.jpg</poster>')
+    lines.append('  <fanart>fanart.jpg</fanart>')
+    if is_tv:
+        lines.append('  <episodeguideurl></episodeguideurl>')
+    lines.append('</%s>' % ('tvshow' if is_tv else 'movie'))
+    return '\n'.join(lines)
+
+
+def scrape_folder(fs, folder_path, media, tmdb):
+    """
+    对重命名后的影视文件夹执行刮削：
+      1. 拉 TMDB 详情
+      2. 生成 tvshow.nfo / movie.nfo
+      3. 下载 poster.jpg + fanart.jpg
+    返回结果 dict。
+    """
+    # 详情
+    is_tv = media.get('media_type') == 'tv'
+    tmdb_id = media.get('id')
+    if not tmdb_id:
+        return {'ok': False, 'msg': '缺少 TMDB ID'}
+    detail = tmdb._req(f'/{("tv" if is_tv else "movie")}/{tmdb_id}',
+                       {'append_to_response': 'images'})
+    if not detail or 'id' not in detail:
+        return {'ok': False, 'msg': 'TMDB 详情拉取失败'}
+
+    nfo_name = 'tvshow.nfo' if is_tv else 'movie.nfo'
+    nfo_content = build_nfo(media, detail)
+    title = media.get('name') or media.get('original_name') or ''
+    year = media.get('year') or ''
+
+    written = []
+    # NFO
+    try:
+        fs.write_file(folder_path.rstrip('/') + '/' + nfo_name, nfo_content)
+        written.append(nfo_name)
+    except Exception as e:
+        return {'ok': False, 'msg': 'NFO 写入失败: %s' % e}
+
+    # 海报 / 背景
+    images = (detail.get('images') or {})
+    poster_path = (images.get('posters') or [{}])[0].get('file_path') or detail.get('poster_path')
+    fanart_path = (images.get('backdrops') or [{}])[0].get('file_path') or detail.get('backdrop_path')
+
+    if poster_path:
+        data = download_image(tmdb, poster_path)
+        if data:
+            try:
+                fs.write_file(folder_path.rstrip('/') + '/poster.jpg', data, binary=True)
+                written.append('poster.jpg')
+            except Exception:
+                pass
+    if fanart_path:
+        data = download_image(tmdb, fanart_path, size='w1280')
+        if data:
+            try:
+                fs.write_file(folder_path.rstrip('/') + '/fanart.jpg', data, binary=True)
+                written.append('fanart.jpg')
+            except Exception:
+                pass
+
+    return {'ok': True, 'files': written, 'title': title, 'year': year}
+
+
 if __name__ == '__main__':
     # 自测
     for n in ['狂飙 第01集.mp4', '01.mp4', '庆余年.S02E08.mkv', '三体.EP10.mkv', '流浪地球2.mp4', '教父2.mp4']:

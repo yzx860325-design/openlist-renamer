@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenList 影视资源智能重命名 — Web 版
-====================================
+OpenList 影视资源智能重命名 — Web 版 v3
+========================================
 Docker 部署后浏览器访问，支持：
-  - 连接 OpenList（Alist 兼容 API）
-  - 目录浏览
+  - 三端来源：OpenList（Alist API）/ NAS 挂载卷 / 电脑本地
+  - 目录浏览（三端统一）
   - TMDB 匹配（输入真实影视名 → 选结果）
   - 批量改名方案 + 执行
+  - 自动刮削：重命名后生成 NFO + 海报/背景图
 
 环境变量：
-  TMDB_KEY   TMDB API Key（可选，默认内置）
-  PORT       监听端口（默认 24568）
-  BASE_URL   默认 OpenList 地址（可选，如 http://192.168.1.100:5244）
-  OL_USER    默认 OpenList 账号（可选）
-  OL_PASS    默认 OpenList 密码（可选）
+  TMDB_KEY    TMDB API Key（可选，默认内置）
+  PORT        监听端口（默认 24568）
+  BASE_URL    默认 OpenList 地址（可选）
+  OL_USER     默认 OpenList 账号（可选）
+  OL_PASS     默认 OpenList 密码（可选）
+  MEDIA_ROOT  本地/NAS 影视根目录（默认 /media，Docker 挂载点）
 """
 
 import os
@@ -22,7 +24,7 @@ import threading
 
 from flask import Flask, render_template, request, jsonify, session
 
-from core import TMDB, OpenList, extract_episode
+from core import TMDB, OpenList, LocalFS, scrape_folder
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'openlist-renamer-secret')
@@ -31,8 +33,9 @@ app.config['JSON_AS_ASCII'] = False
 DEFAULT_OL = os.environ.get('BASE_URL', 'http://10.10.10.1:5445')
 DEFAULT_USER = os.environ.get('OL_USER', 'admin')
 DEFAULT_PASS = os.environ.get('OL_PASS', 'admin')
+MEDIA_ROOT = os.environ.get('MEDIA_ROOT', '/media')
 
-# 会话级 OpenList 客户端（每个浏览器会话独立）
+# 会话级客户端
 _clients = {}
 _lock = threading.Lock()
 
@@ -56,12 +59,34 @@ def make_client(base, user, pwd):
     return ol
 
 
+def get_fs():
+    """返回当前会话的 LocalFS（root 固定为 MEDIA_ROOT）"""
+    return LocalFS(MEDIA_ROOT)
+
+
+def _source_driver(src):
+    """根据来源名返回驱动器实例"""
+    if src == 'fs':
+        return get_fs()
+    ol = get_client()
+    if not ol:
+        raise Exception('OpenList 未连接，请先登录')
+    return ol
+
+
+def _fmt_items(items):
+    return [{'name': it.get('name', ''),
+             'is_dir': it.get('is_dir', False),
+             'size': it.get('size', 0)} for it in items]
+
+
 @app.route('/')
 def index():
     return render_template('index.html',
                            default_ol=DEFAULT_OL,
                            default_user=DEFAULT_USER,
-                           default_pass=DEFAULT_PASS)
+                           default_pass=DEFAULT_PASS,
+                           media_root=MEDIA_ROOT)
 
 
 # ============ API ============
@@ -80,18 +105,24 @@ def api_login():
         return jsonify({'ok': False, 'msg': str(e)})
 
 
+@app.route('/api/fs/roots', methods=['GET'])
+def api_fs_roots():
+    """本地文件系统根信息"""
+    try:
+        exists = os.path.isdir(MEDIA_ROOT)
+        return jsonify({'ok': True, 'root': MEDIA_ROOT, 'exists': exists})
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': str(e)})
+
+
 @app.route('/api/list', methods=['GET'])
 def api_list():
-    ol = get_client()
-    if not ol:
-        return jsonify({'ok': False, 'msg': '未连接，请先登录'})
+    src = request.args.get('src', 'openlist')
     path = request.args.get('path', '/')
     try:
-        items = ol.list_dir(path)
-        data = [{'name': it.get('name', ''),
-                 'is_dir': it.get('is_dir', False),
-                 'size': it.get('size', 0)} for it in items]
-        return jsonify({'ok': True, 'path': path, 'items': data})
+        driver = _source_driver(src)
+        items = driver.list_dir(path)
+        return jsonify({'ok': True, 'path': path, 'src': src, 'items': _fmt_items(items)})
     except Exception as e:
         return jsonify({'ok': False, 'msg': str(e)})
 
@@ -126,10 +157,8 @@ def api_search():
 
 @app.route('/api/plan', methods=['POST'])
 def api_plan():
-    ol = get_client()
-    if not ol:
-        return jsonify({'ok': False, 'msg': '未连接，请先登录'})
     data = request.get_json(silent=True) or {}
+    src = data.get('src', 'openlist')
     path = data.get('path', '/')
     media = data.get('media')
     include_year = data.get('include_year', True)
@@ -138,7 +167,8 @@ def api_plan():
 
     tmdb = TMDB()
     try:
-        items = ol.list_dir(path)
+        driver = _source_driver(src)
+        items = driver.list_dir(path)
         plans = []
         for it in items:
             new_name, note = tmdb.build_plan(it, media, include_year)
@@ -156,17 +186,60 @@ def api_plan():
 
 @app.route('/api/rename', methods=['POST'])
 def api_rename():
-    ol = get_client()
-    if not ol:
-        return jsonify({'ok': False, 'msg': '未连接，请先登录'})
     data = request.get_json(silent=True) or {}
+    src = data.get('src', 'openlist')
     targets = data.get('items', [])
+    scrape = data.get('scrape', True)  # 是否刮削
     if not targets:
         return jsonify({'ok': False, 'msg': '没有选择任何项目'})
+    try:
+        driver = _source_driver(src)
+        ok, results = driver.batch_rename([(t['src_path'], t['new_name']) for t in targets])
 
-    ok, results = ol.batch_rename([(t['src_path'], t['new_name']) for t in targets])
-    return jsonify({'ok': True, 'success': ok, 'total': len(targets),
-                    'results': [{'path': p, 'new_name': n, 'ok': s, 'msg': m} for p, n, s, m in results]})
+        # 刮削：对重命名成功的【文件夹】执行（剧集/电影整库文件夹）
+        scrape_results = []
+        tmdb = TMDB()
+        if scrape:
+            for t in targets:
+                # 判断：如果改的是文件夹且原路径是目录 → 刮削该文件夹
+                parent_path = t['src_path'].rsplit('/', 1)[0]
+                new_full = parent_path + '/' + t['new_name']
+                if not t.get('is_dir'):
+                    continue
+                try:
+                    r = scrape_folder(driver, new_full, t.get('media') or {}, tmdb)
+                    if r.get('ok'):
+                        scrape_results.append({'path': new_full, 'files': r.get('files', []), 'ok': True})
+                    else:
+                        scrape_results.append({'path': new_full, 'ok': False, 'msg': r.get('msg')})
+                except Exception as e:
+                    scrape_results.append({'path': new_full, 'ok': False, 'msg': str(e)})
+
+        return jsonify({'ok': True, 'success': ok, 'total': len(targets),
+                        'scrape': scrape_results,
+                        'results': [{'path': p, 'new_name': n, 'ok': s, 'msg': m} for p, n, s, m in results]})
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': str(e)})
+
+
+@app.route('/api/scrape', methods=['POST'])
+def api_scrape():
+    """对指定文件夹执行刮削（已重命名的文件夹）"""
+    data = request.get_json(silent=True) or {}
+    src = data.get('src', 'openlist')
+    path = data.get('path', '')
+    media = data.get('media') or {}
+    if not path:
+        return jsonify({'ok': False, 'msg': '缺少路径'})
+    if not media.get('id'):
+        return jsonify({'ok': False, 'msg': '缺少 TMDB 匹配'})
+    try:
+        driver = _source_driver(src)
+        tmdb = TMDB()
+        r = scrape_folder(driver, path, media, tmdb)
+        return jsonify(r)
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': str(e)})
 
 
 if __name__ == '__main__':
