@@ -130,9 +130,10 @@
     <tbody></tbody>
   </table>
   <div class="row mt">
-    <label><input type="checkbox" id="scrapeChk" checked> 重命名后自动刮削（生成 NFO + 海报）</label>
+    <label><input type="checkbox" id="scrapeChk" checked> 重命名后自动刮削</label>
     <span id="scrapeHint" class="hint"></span>
-    <button class="danger" onclick="doRename()">执行重命名</button>
+    <button id="btnRename" class="danger" onclick="doRename()">执行重命名</button>
+    <button id="btnScrape" class="primary" style="background:#059669" onclick="doScrape()">执行刮削</button>
     <span class="count">⚠ 直接修改文件名，不可撤销</span>
   </div>
 </div>
@@ -170,6 +171,7 @@ function switchSrc(src) {
   if (src === 'fs') checkFsRoot();
   // 刮削只对 fs 来源有效（OpenList v3 上传 API 兼容性问题）
   $('#scrapeChk').disabled = (src !== 'fs');
+  $('#btnScrape').disabled = (src !== 'fs');
   if (src !== 'fs') {
     $('#scrapeChk').checked = false;
     $('#scrapeHint').textContent = '（OpenList 来源不支持写入文件 → 刮削已禁用）';
@@ -322,6 +324,27 @@ async function doRename() {
     }
     if (d.success) await listDir(currentPath);
   } catch(e) { log('❌ ' + e.message, 'err'); }
+}
+
+// ---------- 独立刮削（不改文件名，只生成 NFO/海报）----------
+async function doScrape() {
+  if (!connOK()) { log('请先连接', 'err'); return; }
+  if (currentSrc !== 'fs') { log('刮削仅支持 NAS/本地来源（OpenList 不支持写文件）', 'err'); return; }
+  if (!selectedMedia) { log('请先匹配 TMDB 选择影视', 'err'); return; }
+  if (!confirm(`对当前目录「${currentPath}」执行刮削吗？\n将生成：tvshow.nfo / movie.nfo + poster.jpg + fanart.jpg（不改文件名）`)) return;
+  $('#btnScrape').disabled = true;
+  try {
+    const d = await api('/api/scrape', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({src: currentSrc, path: currentPath, media: selectedMedia})
+    });
+    log(`🖼 刮削成功：${d.files.join(', ')}`, 'ok');
+    log(`   标题：${d.title} (${d.year})`, 'ok');
+    await listDir(currentPath);
+  } catch(e) {
+    log('❌ ' + e.message, 'err');
+  }
+  $('#btnScrape').disabled = false;
 }
 
 function esc(s) {
